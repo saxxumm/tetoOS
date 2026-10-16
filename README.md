@@ -72,7 +72,7 @@ She lives in the bottom-right corner.
 She knows only what the shell already knows — the time, the music, the battery, the
 wallpaper. She never reads your windows. Her lines are in Russian.
 
-The pixel Teto was drawn by [saxxumm](https://github.com/saxxumm). Put your own frames
+Put your own frames
 (`idle.png`, `blink.png`, `talk.png`, `happy.png`, `sleep.png`, `shock.png`, `dizzy.png`,
 `cheer.png`, `wink.png`, `eat.png`, `chew.png`, any size) into `~/.local/share/tetoos/teto/`
 to give her a different look.
