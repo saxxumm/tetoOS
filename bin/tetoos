@@ -1,0 +1,98 @@
+#!/bin/sh
+# tetoos — run and drive the tetoOS shell (Hyprland or sxmwm).
+#
+#   tetoos start              run the shell (restarts it if it crashes)
+#   tetoos stop               stop it
+#   tetoos restart
+#   tetoos status             is it running, and on what
+#   tetoos ipc <fn> [args]    call the shell: launcher, control, settings,
+#                             wallpapers, clipboard, power, edit, lock,
+#                             previewLock, setWallpaper <path>, nextWallpaper,
+#                             preset <name>, toggleMode, sound, wifi,
+#                             bluetooth, record, karaoke, tetoSay <text>,
+#                             tetoSing, tetoDance, tetoEat, tetoMenu, bread, …
+#   tetoos idle               swayidle: lock after 10 min and before sleep
+#   tetoos palette <image>    recolour from a picture without changing it
+#   tetoos use [hyprland|sxmwm]     hook tetoOS into the compositor's config
+#                                   (a backup is kept; picks the running one)
+#   tetoos revert [hyprland|sxmwm]  take it out again
+set -eu
+
+dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+state="${TETOOS_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/tetoos}"
+runtime="${XDG_RUNTIME_DIR:-/tmp}/tetoos"
+export TETOOS_STATE="$state"
+mkdir -p "$state" "$runtime"
+
+ipc() { qs -p "$dir" ipc call tetoos "$@"; }
+
+compositor() {
+    case "${1:-}" in
+        hyprland|sxmwm) echo "$1"; return ;;
+    esac
+    if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then echo hyprland
+    elif [ "${XDG_CURRENT_DESKTOP:-}" = sxmwm ] || command -v sxmwm >/dev/null 2>&1; then echo sxmwm
+    elif command -v Hyprland >/dev/null 2>&1 || command -v hyprland >/dev/null 2>&1; then echo hyprland
+    else echo none
+    fi
+}
+
+case "${1:-}" in
+start)
+    # One supervisor per session. A crash brings the shell back after a
+    # second; `tetoos stop` raises a flag first so the loop lets it stay down.
+    if [ -f "$runtime/supervisor.pid" ] && kill -0 "$(cat "$runtime/supervisor.pid")" 2>/dev/null; then
+        echo "tetoos: already running" >&2
+        exit 0
+    fi
+    rm -f "$runtime/stopping"
+    # first run: Teto's own colours until a wallpaper gives some
+    [ -f "$state/colors.json" ] || python3 -I "$dir/scripts/palette.py" seed "#d13d5a" "#a986d6" "#9fd0ef" 2>/dev/null || true
+    setsid sh -c 'while :; do qs -p "$1"; [ -f "$2/stopping" ] && break; sleep 1; done' \
+        tetoos-loop "$dir" "$runtime" >"$runtime/shell.log" 2>&1 &
+    echo $! > "$runtime/supervisor.pid"
+    ;;
+stop)
+    touch "$runtime/stopping"
+    [ -f "$runtime/supervisor.pid" ] && kill "$(cat "$runtime/supervisor.pid")" 2>/dev/null || true
+    pkill -f "^qs -p $dir\$" 2>/dev/null || true
+    rm -f "$runtime/supervisor.pid"
+    ;;
+restart)
+    "$0" stop
+    sleep 0.5
+    "$0" start
+    ;;
+status)
+    if [ -f "$runtime/supervisor.pid" ] && kill -0 "$(cat "$runtime/supervisor.pid")" 2>/dev/null; then
+        echo "tetoOS is running on $(compositor) (log: $runtime/shell.log)"
+    else
+        echo "tetoOS is not running"
+        exit 1
+    fi
+    ;;
+ipc)
+    shift
+    ipc "$@"
+    ;;
+idle)
+    exec swayidle -w \
+        timeout 600 "$0 ipc lock" \
+        before-sleep "$0 ipc lock"
+    ;;
+palette)
+    python3 -I "$dir/scripts/palette.py" image "$2"
+    ;;
+use|revert)
+    what=$1
+    case "$(compositor "${2:-}")" in
+        hyprland) exec python3 -I "$dir/scripts/hypr-use.py" "$what" "$dir" ;;
+        sxmwm) exec python3 -I "$dir/scripts/sxmwm-use.py" "$what" "$dir" ;;
+        *) echo "tetoos: no Hyprland or sxmwm found; say which: tetoos $what hyprland" >&2; exit 1 ;;
+    esac
+    ;;
+*)
+    sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
+    exit 2
+    ;;
+esac
